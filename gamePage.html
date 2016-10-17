@@ -1,0 +1,591 @@
+
+<html>
+<head>
+
+<title>Colors Game</title>
+
+
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+
+
+
+<style>
+
+  .navbar-brand {
+    padding: 0px;
+  }
+  .navbar-brand>img {
+    height: 80px;
+    width: auto;
+    padding: 7px 15px;
+  }
+
+.navbar-brand {
+  height: 80px;
+}
+
+.nav >li >a {
+  padding-top: 30px;
+  padding-bottom: 30px;
+}
+
+.navbar-toggle {
+  padding: 10px;
+  margin: 25px 15px 25px 0;
+}
+
+</style>
+
+<script type="text/javascript" src="js/glMatrix-0.9.5.min.js"></script>
+
+<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+  varying vec4 vColor;
+
+    void main(void) {
+        //gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+    gl_FragColor = vColor;
+    }
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+  attribute vec4 aVertexColor;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+
+  varying vec4 vColor;
+
+    void main(void) {
+        gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+    vColor = aVertexColor;
+    }
+</script>
+
+
+<script type="text/javascript">
+
+  var totalRows = 20;
+  var totalColumns = 20;
+
+    var gl;
+    function initGL(canvas) {
+        try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+    }
+
+
+    function getShader(gl, id) {
+        //alert("Inside Shader");
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+
+    var shaderProgram;
+
+    function initShaders() {
+        var fragmentShader = getShader(gl, "shader-fs");
+        var vertexShader = getShader(gl, "shader-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+        shaderProgram.vertexColorAttribute = gl.getAttribLocation(shaderProgram, "aVertexColor");
+        gl.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+        
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+    }
+
+
+    var mvMatrix = mat4.create();
+    var pMatrix = mat4.create();
+
+    function setMatrixUniforms() {
+        gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+    }
+
+
+
+    var triangleVertexPositionBuffer;
+    var squareVertexPositionBuffer = [];
+    var squareVertexColorBuffer = [];
+
+    var rectanglesDataHolder = [];
+    var coveredRectanglesDataHolder = [];
+
+    coveredRectanglesDataHolder[0] = "0,0";
+
+    var movesLeft;
+
+    function initBuffers() {
+        triangleVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
+        var vertices = [
+             0.0,  0.0,  0.0,
+            -0.0, -0.0,  0.0,
+             0.0, -0.0,  0.0
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        triangleVertexPositionBuffer.itemSize = 3;
+        triangleVertexPositionBuffer.numItems = 3;
+
+        movesLeft = 50;
+        document.getElementById("movesLeft").innerHTML = movesLeft;
+
+        for(var i=0; i<totalRows; i++) {
+          squareVertexPositionBuffer[i] = [];
+          squareVertexColorBuffer[i] = [];
+
+          rectanglesDataHolder[i] = [];
+          
+           for(var j=0; j<totalColumns; j++) {
+            squareVertexPositionBuffer[i][j] = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer[i][j]);
+            vertices = [
+                 0.1,  0.1,  0.0,
+                -0.1,  0.1,  0.0,
+                 0.1, -0.1,  0.0,
+                -0.1, -0.1,  0.0
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            squareVertexPositionBuffer[i][j].itemSize = 3;
+            squareVertexPositionBuffer[i][j].numItems = 4;
+
+            //Colors Coding
+            squareVertexColorBuffer[i][j] = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexColorBuffer[i][j]);
+            var colors = [];
+
+            var colorVertexCode = Math.floor((Math.random() * 8) + 1);
+            var colorVertex = getColorVertexFromCode(colorVertexCode);
+
+            rectanglesDataHolder[i][j] = colorVertexCode;
+            
+            console.log(i + " " + j + " Code is : " + colorVertexCode + " Vertex is : " + colorVertex);
+            
+            for (var k=0; k < 4; k++) {
+                colors = colors.concat(colorVertex);
+            }
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+            squareVertexColorBuffer[i][j].itemSize = 4;
+            squareVertexColorBuffer[i][j].numItems = 4;
+            
+           }
+        }
+        
+        
+    }
+
+    function getColorVertexFromCode(code) {
+    if(code === 1) {
+      //blue
+      return [0.0, 0.0, 1.0, 1.0];
+    }
+    else if(code === 2) {
+      //green
+      return [0.0, 1.0, 0.0, 1.0];
+    }
+    else if(code === 3) {
+      //red
+      return [1.0, 0.0, 0.0, 1.0];
+    }
+    else if(code === 4) {
+      //Violet
+      return [0.0, 1.0, 1.0, 1.0];
+    }
+    else if(code === 5) {
+      //Pink
+      return [1.0, 0.0, 1.0, 1.0];
+    }
+    else if(code === 6) {
+      //Yellow
+      return [1.0, 1.0, 0.0, 1.0];
+    }
+    else if(code === 7) {
+      //Yellow
+      return [1.0, 1.0, 1.0, 1.0];
+    }
+    else if(code === 8) {
+      //Grey
+      return [0.5, 0.5, 0.5, 1.0];
+    }
+    
+    }
+
+
+    function drawScene() {
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+
+        mat4.identity(mvMatrix);
+
+        //Traingle Draw Code//
+        mat4.translate(mvMatrix, [-2.0, 2.0, -7.0]);
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, triangleVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+        setMatrixUniforms();
+        gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
+
+
+        var rowPosition = 0.0;
+        var columnPosition = 3.0;
+
+        
+        for(var i=0; i<totalRows; i++) {
+
+          var vertexPosition;
+
+          if(i==0) {
+            vertexPosition = [0.0, 0.0, 0.0];
+            }
+          else {
+            vertexPosition = [-0.2 * 19, -0.2, 0.0];
+            }
+          
+          mat4.translate(mvMatrix, vertexPosition);
+            gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer[i][0]);
+            gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer[i][0].itemSize, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexColorBuffer[i][0]);
+            gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, squareVertexColorBuffer[i][0].itemSize, gl.FLOAT, false, 0, 0);
+            
+            setMatrixUniforms();
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer[i][0].numItems);
+          
+          columnPosition = 0.20;
+          rowPosition = 0.0;
+          
+          for(var j=1; j<totalColumns; j++) {
+            //alert(columnPosition);
+            vertexPosition = [columnPosition, rowPosition, 0.0];
+  
+            //console.log(vertexPosition);
+            console.log(squareVertexPositionBuffer[i][j]);
+            
+            mat4.translate(mvMatrix, vertexPosition);
+              gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer[i][j]);
+              gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer[i][j].itemSize, gl.FLOAT, false, 0, 0);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexColorBuffer[i][j]);
+              gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, squareVertexColorBuffer[i][j].itemSize, gl.FLOAT, false, 0, 0);
+                    
+              
+              setMatrixUniforms();
+              gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer[i][j].numItems);
+  
+              //columnPosition = 0.1;
+          }
+
+          //rowPosition = ;
+          //columnPosition = columnPosition - (0.20 * 20);
+      
+        }
+        
+        //console.log("22");
+
+        //mat4.translate(mvMatrix, [1.0, 1.0, 0.0]);
+        //gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer[0]);
+        //gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer[0].itemSize, gl.FLOAT, false, 0, 0);
+        //setMatrixUniforms();
+        //gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer[0].numItems);
+        
+        //mat4.translate(mvMatrix, [0.0, 1.0, 0.0]);
+        //gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer[1]);
+        //gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer[1].itemSize, gl.FLOAT, false, 0, 0);
+        //setMatrixUniforms();
+        //gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer[1].numItems);
+    }
+
+    function reverifyMatchingRectangles(code) {
+
+      for(var i=0;i<coveredRectanglesDataHolder.length; i++) {
+
+        var x = parseInt(coveredRectanglesDataHolder[i].split(",")[0]);
+        var y = parseInt(coveredRectanglesDataHolder[i].split(",")[1]);
+
+        rectanglesDataHolder[x][y] = code;
+        
+        }
+
+      while(true) {
+
+        var foundAtleastOneSquareMatchingCriteria = false;
+          
+        for(var i=0;i<totalRows; i++) {
+  
+          for(var j=0;j<totalColumns; j++) {
+  
+            if((j+1) < totalColumns && !(isNotCovered(i+","+j)) && rectanglesDataHolder[i][j] === rectanglesDataHolder[i][j+1] && isNotCovered(i+","+(j+1))) {
+
+              coveredRectanglesDataHolder[coveredRectanglesDataHolder.length] = i+","+(j+1);
+              foundAtleastOneSquareMatchingCriteria = true;
+              
+            }
+            if((j-1) >= 0 && !(isNotCovered(i+","+j)) && rectanglesDataHolder[i][j] === rectanglesDataHolder[i][j-1] && isNotCovered(i+","+(j-1))) {
+
+              coveredRectanglesDataHolder[coveredRectanglesDataHolder.length] = i+","+(j-1);
+              foundAtleastOneSquareMatchingCriteria = true;
+              
+            }
+            if((i+1) < totalRows && !(isNotCovered(i+","+j)) && rectanglesDataHolder[i][j] === rectanglesDataHolder[i+1][j] && isNotCovered((i+1)+","+j)) {
+
+              coveredRectanglesDataHolder[coveredRectanglesDataHolder.length] = (i+1)+","+j;
+              foundAtleastOneSquareMatchingCriteria = true;
+              
+            }
+            if((i-1) >= 0 && !(isNotCovered(i+","+j)) && rectanglesDataHolder[i][j] === rectanglesDataHolder[i-1][j] && isNotCovered((i-1)+","+j)) {
+
+              coveredRectanglesDataHolder[coveredRectanglesDataHolder.length] = (i-1)+","+j;
+              foundAtleastOneSquareMatchingCriteria = true;
+              
+            }
+            
+            }
+          
+          }
+
+          if(!(foundAtleastOneSquareMatchingCriteria)) {
+        break;
+      }
+          
+      }
+      
+    }
+
+    function isNotCovered(coveredStr) {
+
+      for(var i=0;i<coveredRectanglesDataHolder.length;i++) {
+
+        if(coveredRectanglesDataHolder[i] === coveredStr) {
+        return false;
+            }
+        
+        }
+        
+        return true;
+    
+    }
+
+    function webGLStart() {
+        var canvas = document.getElementById("game-canvas");
+        initGL(canvas);
+        initShaders();
+        initBuffers();
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+
+        drawScene();
+        
+    }
+
+    
+    function handleColorClick(code) {
+
+        if(movesLeft > 0) {
+      reverifyMatchingRectangles(code);
+      reprepareBuffer()
+      drawScene();
+      movesLeft--;
+      document.getElementById("movesLeft").innerHTML = movesLeft;
+        }
+        else {
+          document.getElementById("gameStatus").innerHTML = "Ended";
+        }
+    }
+
+    function reprepareBuffer() {
+
+      /*triangleVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
+        var vertices = [
+             0.0,  0.0,  0.0,
+            -0.0, -0.0,  0.0,
+             0.0, -0.0,  0.0
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        triangleVertexPositionBuffer.itemSize = 3;
+        triangleVertexPositionBuffer.numItems = 3;
+
+        */
+        
+        for(var i=0; i<totalRows; i++) {
+          //squareVertexPositionBuffer[i] = [];
+          //squareVertexColorBuffer[i] = [];
+
+          //rectanglesDataHolder[i] = [];
+          
+           for(var j=0; j<totalColumns; j++) {
+            /*squareVertexPositionBuffer[i][j] = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer[i][j]);
+            vertices = [
+                 0.1,  0.1,  0.0,
+                -0.1,  0.1,  0.0,
+                 0.1, -0.1,  0.0,
+                -0.1, -0.1,  0.0
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            squareVertexPositionBuffer[i][j].itemSize = 3;
+            squareVertexPositionBuffer[i][j].numItems = 4;
+        */
+            //Colors Coding
+            //squareVertexColorBuffer[i][j] = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexColorBuffer[i][j]);
+            var colors = [];
+
+            var colorVertexCode = rectanglesDataHolder[i][j];
+            var colorVertex = getColorVertexFromCode(colorVertexCode);
+
+            rectanglesDataHolder[i][j] = colorVertexCode;
+            
+            console.log(i + " " + j + " Code is : " + colorVertexCode + " Vertex is : " + colorVertex);
+            
+            for (var k=0; k < 4; k++) {
+                colors = colors.concat(colorVertex);
+            }
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+            
+           }
+        }
+        
+      
+    }
+
+
+</script>
+
+</head>
+
+<body onload="webGLStart();">
+
+<nav class="navbar navbar-default navbar-fixed-top">
+  <div class="container-fluid">
+    <!-- Brand and toggle get grouped for better mobile display -->
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1" aria-expanded="false">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="index.jsp"><b><img alt="dsaigoud.com" src="http://dsaigoud.com/images/logo.png" style="height: 80px"></b></a>
+    </div>
+
+    <!-- Collect the nav links, forms, and other content for toggling -->
+    <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+      <ul class="nav navbar-nav">
+        <li><a href="index.jsp">Ubuntu Help</a></li>
+        <li><a href="javaprograms.jsp">Java Programs</a></li>
+        <li><a href="book-store-application.jsp">Book Store Application</a></li>
+        <li><a href="amazon-aws-instance-setup-and-j2ee-app-deployment.jsp">Amazon AWS Windows Server Instance Setup</a></li>
+        <li class="active"><a href="colorsGame.jsp">Colors Game<span class="sr-only">(current)</span></a></li>
+      </ul>
+      
+      
+    </div><!-- /.navbar-collapse -->
+  </div><!-- /.container-fluid -->
+</nav>
+
+<div class="container">
+
+<br>
+<br>
+<br>
+<br>
+
+<h1 style="text-align: center">Colors Game</h1>
+
+<br><br>
+	
+<div style="width: 70%;" align="center">
+    
+      <div><canvas id="game-canvas" style="border: none;" width="500" height="500"></canvas>
+      
+      <div style="position: fixed; float: right; text-align: left; top: 30%; right: 15%;">
+        <h4>Moves Left &nbsp;: <span id="movesLeft">50</span><br></h4>
+        <h4>Game Status : <span id="gameStatus">Running</span><br><br></h4>
+        
+        <div style="font-zize: 15px; text-align: center; border: 1px solid #eee">
+          <h4>Game Play Buttons</h4><br>
+        <button onclick="handleColorClick(1);" style="background:   #0000FF; border: 1px solid black; height: 30px; width: 50px;">Blue</button>&nbsp;&nbsp;
+        <button onclick="handleColorClick(2);" style="background: #00FF00; border: 1px solid black; height: 30px; width: 50px;">Green</button>&nbsp;&nbsp;
+        <button onclick="handleColorClick(3);" style="background: #FF0000; border: 1px solid black; height: 30px; width: 50px;">Red</button>&nbsp;&nbsp;
+        <button onclick="handleColorClick(4);" style="background: #01FFF5; border: 1px solid black; height: 30px; width: 50px;">Violet</button><br><br>
+        <button onclick="handleColorClick(5);" style="background: #FF00FF; border: 1px solid black; height: 30px; width: 50px;">Pink</button>&nbsp;&nbsp;
+        <button onclick="handleColorClick(6);" style="background: #FEFD02; border: 1px solid black; height: 30px; width: 50px;">Yellow</button>&nbsp;&nbsp;
+        <button onclick="handleColorClick(7);" style="background: #FFFFFF; border: 1px solid black; height: 30px; width: 50px;">White</button>&nbsp;&nbsp;
+        <button onclick="handleColorClick(8);" style="background: #797D80; border: 1px solid black; height: 30px; width: 50px;">Grey</button><br>
+        </div>
+        
+      </div>
+      
+        
+      
+  </div>
+
+
+</div>
+
+
+</body>
+</html>
